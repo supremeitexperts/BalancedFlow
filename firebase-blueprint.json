@@ -1,0 +1,59 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User account detail containing core preferences",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email"]
+    },
+    "Task": {
+      "title": "Task",
+      "description": "Mindful planner intention task item",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "status": { "type": "string", "enum": ["inbox", "this-month", "someday", "today"] },
+        "category": { "type": "string", "enum": ["Work", "Spiritual", "Admin", "Personal", "Milestone", "Growth", "Wellness", "Rest"] },
+        "timeEstimated": { "type": "string" },
+        "completed": { "type": "boolean" },
+        "prayerTimeslot": { "type": "string", "enum": ["Pre-Fajr", "Fajr", "Dhuhr", "Asr", "Maghrib", "Isha", "Night"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "title", "status", "category", "completed", "createdAt"]
+    },
+    "Habit": {
+      "title": "Habit",
+      "description": "A mindful habit with current streak and latest 30-day history array representation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "streak": { "type": "number" },
+        "history": { "type": "array" }
+      },
+      "required": ["id", "name", "streak", "history"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile metadata"
+    },
+    "/users/{userId}/tasks/{taskId}": {
+      "schema": "Task",
+      "description": "Subcollection storing tasks belonging to a specific user"
+    },
+    "/users/{userId}/habits/{habitId}": {
+      "schema": "Habit",
+      "description": "Subcollection storing habits belonging to a specific user"
+    }
+  }
+}

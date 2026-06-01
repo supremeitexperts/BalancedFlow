@@ -1,0 +1,6 @@
+{
+  "name": "Balanced Flow",
+  "description": "A beautiful, mindful productivity application with a focus backlog, daily planner, habits sanctum, and evening rollover reflection.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,109 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net default-deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Hardened Global Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      return isSignedIn();
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // --- Validation Blueprints ---
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email'])
+        && data.keys().size() <= 10
+        && data.uid == request.auth.uid
+        && data.email is string
+        && data.email.size() <= 256;
+    }
+
+    function isValidTask(data) {
+      return data.keys().hasAll(['id', 'title', 'status', 'category', 'completed', 'createdAt'])
+        && data.keys().size() <= 9
+        && data.id is string
+        && data.id.size() <= 128
+        && data.title is string
+        && data.title.size() > 0
+        && data.title.size() <= 300
+        && data.status in ['inbox', 'this-week', 'this-month', 'someday', 'today']
+        && data.category in ['Work', 'Spiritual', 'Admin', 'Personal', 'Milestone', 'Growth', 'Wellness', 'Rest']
+        && data.completed is bool
+        && data.createdAt is string
+        && (!data.keys().hasAny(['timeEstimated']) || (data.timeEstimated is string && data.timeEstimated.size() <= 100))
+        && (!data.keys().hasAny(['prayerTimeslot']) || (data.prayerTimeslot == null || data.prayerTimeslot in ['Pre-Fajr', 'Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha', 'Night']))
+        && (!data.keys().hasAny(['description']) || (data.description is string && data.description.size() <= 2000));
+    }
+
+    function isValidHabit(data) {
+      return data.keys().hasAll(['id', 'name', 'streak', 'history'])
+        && data.keys().size() <= 6
+        && data.id is string
+        && data.id.size() <= 128
+        && data.name is string
+        && data.name.size() > 0
+        && data.name.size() <= 200
+        && data.streak is int
+        && data.history is list
+        && data.history.size() <= 40
+        && (!data.keys().hasAny(['frequency']) || data.frequency in ['daily', 'weekly', 'monthly'])
+        && (!data.keys().hasAny(['targetCount']) || (data.targetCount is int && data.targetCount >= 1 && data.targetCount <= 31));
+    }
+
+    // --- Users Collection Rules ---
+    match /users/{userId} {
+      allow get: if isEmailVerified() && userId == request.auth.uid;
+      allow create: if isEmailVerified() && userId == request.auth.uid && isValidUser(request.resource.data);
+      allow update: if isEmailVerified() && userId == request.auth.uid && isValidUser(request.resource.data);
+      allow delete: if false; // Users cannot be deleted from Client SDK
+
+      // --- Tasks Subcollection ---
+      match /tasks/{taskId} {
+        allow list: if isEmailVerified() && userId == request.auth.uid;
+        allow get: if isEmailVerified() && userId == request.auth.uid && isValidId(taskId);
+        allow create: if isEmailVerified() && userId == request.auth.uid && isValidId(taskId) && isValidTask(request.resource.data);
+        allow update: if isEmailVerified() && userId == request.auth.uid && isValidId(taskId)
+          && isValidTask(request.resource.data)
+          && request.resource.data.id == resource.data.id
+          && request.resource.data.createdAt == resource.data.createdAt
+          && (
+            // Action 1: Toggle completed
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['completed']) ||
+            // Action 2: Drag/drop or shift slot & status
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'prayerTimeslot']) ||
+            // Action 3: Detailed edit
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['title', 'description', 'category', 'timeEstimated', 'prayerTimeslot', 'status'])
+          );
+        allow delete: if isEmailVerified() && userId == request.auth.uid && isValidId(taskId);
+      }
+
+      // --- Habits Subcollection ---
+      match /habits/{habitId} {
+        allow list: if isEmailVerified() && userId == request.auth.uid;
+        allow get: if isEmailVerified() && userId == request.auth.uid && isValidId(habitId);
+        allow create: if isEmailVerified() && userId == request.auth.uid && isValidId(habitId) && isValidHabit(request.resource.data);
+        allow update: if isEmailVerified() && userId == request.auth.uid && isValidId(habitId)
+          && isValidHabit(request.resource.data)
+          && request.resource.data.id == resource.data.id
+          && (
+            // Action 1: Track progress (history log + streak update)
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['history', 'streak']) ||
+            // Action 2: Edit description/name details
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'frequency', 'targetCount'])
+          );
+        allow delete: if isEmailVerified() && userId == request.auth.uid && isValidId(habitId);
+      }
+    }
+  }
+}
