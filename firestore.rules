@@ -31,7 +31,7 @@ service cloud.firestore {
 
     function isValidTask(data) {
       return data.keys().hasAll(['id', 'title', 'status', 'category', 'completed', 'createdAt'])
-        && data.keys().size() <= 9
+        && data.keys().size() <= 12
         && data.id is string
         && data.id.size() <= 128
         && data.title is string
@@ -43,12 +43,15 @@ service cloud.firestore {
         && data.createdAt is string
         && (!data.keys().hasAny(['timeEstimated']) || (data.timeEstimated is string && data.timeEstimated.size() <= 100))
         && (!data.keys().hasAny(['prayerTimeslot']) || (data.prayerTimeslot == null || data.prayerTimeslot in ['Pre-Fajr', 'Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha', 'Night']))
-        && (!data.keys().hasAny(['description']) || (data.description is string && data.description.size() <= 2000));
+        && (!data.keys().hasAny(['description']) || (data.description is string && data.description.size() <= 2000))
+        && (!data.keys().hasAny(['deletedAt']) || (data.deletedAt == null || data.deletedAt is number))
+        && (!data.keys().hasAny(['order']) || (data.order == null || data.order is number))
+        && (!data.keys().hasAny(['subtasks']) || data.subtasks is list);
     }
 
     function isValidHabit(data) {
       return data.keys().hasAll(['id', 'name', 'streak', 'history'])
-        && data.keys().size() <= 6
+        && data.keys().size() <= 7
         && data.id is string
         && data.id.size() <= 128
         && data.name is string
@@ -58,7 +61,8 @@ service cloud.firestore {
         && data.history is list
         && data.history.size() <= 40
         && (!data.keys().hasAny(['frequency']) || data.frequency in ['daily', 'weekly', 'monthly'])
-        && (!data.keys().hasAny(['targetCount']) || (data.targetCount is int && data.targetCount >= 1 && data.targetCount <= 31));
+        && (!data.keys().hasAny(['targetCount']) || (data.targetCount is int && data.targetCount >= 1 && data.targetCount <= 31))
+        && (!data.keys().hasAny(['order']) || (data.order == null || data.order is number));
     }
 
     // --- Users Collection Rules ---
@@ -78,12 +82,14 @@ service cloud.firestore {
           && request.resource.data.id == resource.data.id
           && request.resource.data.createdAt == resource.data.createdAt
           && (
-            // Action 1: Toggle completed
-            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['completed']) ||
-            // Action 2: Drag/drop or shift slot & status
-            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'prayerTimeslot']) ||
-            // Action 3: Detailed edit
-            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['title', 'description', 'category', 'timeEstimated', 'prayerTimeslot', 'status'])
+            // Action 1: Toggle completed or subtasks modification
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['completed', 'subtasks']) ||
+            // Action 2: Drag/drop or shift slot & status, including order reordering
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'prayerTimeslot', 'order']) ||
+            // Action 3: Detailed edit including subtasks
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['title', 'description', 'category', 'timeEstimated', 'prayerTimeslot', 'status', 'order', 'subtasks']) ||
+            // Action 4: Trash updates
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deletedAt'])
           );
         allow delete: if isEmailVerified() && userId == request.auth.uid && isValidId(taskId);
       }
@@ -99,8 +105,10 @@ service cloud.firestore {
           && (
             // Action 1: Track progress (history log + streak update)
             request.resource.data.diff(resource.data).affectedKeys().hasOnly(['history', 'streak']) ||
-            // Action 2: Edit description/name details
-            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'frequency', 'targetCount'])
+            // Action 2: Edit description/name details or order reordering
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'frequency', 'targetCount', 'order']) ||
+            // Action 3: Reorder sequence
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['order'])
           );
         allow delete: if isEmailVerified() && userId == request.auth.uid && isValidId(habitId);
       }

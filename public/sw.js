@@ -30,3 +30,18 @@ self.addEventListener('notificationclick', (event) => {
     })
   );
 });
+
+// Resilient background test scheduling
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SCHEDULE_NOTIFICATION_TEST') {
+    const { delaySeconds, title, body } = event.data;
+    setTimeout(() => {
+      self.registration.showNotification(title, {
+        body: body,
+        icon: '/icon-192.png',
+        badge: '/icon-192.png',
+        tag: 'test-scheduled-notification'
+      });
+    }, delaySeconds * 1000);
+  }
+});

@@ -7,22 +7,31 @@ interface AddGoalModalProps {
   isOpen: boolean;
   onClose: () => void;
   onCreateGoal: (title: string, desc: string, category: TaskCategory, status: TaskStatus) => Promise<boolean>;
+  fixedStatus?: TaskStatus;
 }
 
 export default function AddGoalModal({
   isOpen,
   onClose,
   onCreateGoal,
+  fixedStatus,
 }: AddGoalModalProps) {
   const [newGoalTitle, setNewGoalTitle] = useState('');
   const [newGoalDesc, setNewGoalDesc] = useState('');
   const [newGoalCategory, setNewGoalCategory] = useState<TaskCategory>('Work');
   const [newGoalStatus, setNewGoalStatus] = useState<TaskStatus>('inbox');
 
+  React.useEffect(() => {
+    if (isOpen) {
+      setNewGoalStatus(fixedStatus || 'inbox');
+    }
+  }, [isOpen, fixedStatus]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newGoalTitle.trim()) return;
-    const success = await onCreateGoal(newGoalTitle, newGoalDesc, newGoalCategory, newGoalStatus);
+    const finalStatus = fixedStatus || newGoalStatus;
+    const success = await onCreateGoal(newGoalTitle, newGoalDesc, newGoalCategory, finalStatus);
     if (success) {
       setNewGoalTitle('');
       setNewGoalDesc('');
@@ -77,7 +86,7 @@ export default function AddGoalModal({
           </div>
 
           <div className="grid grid-cols-2 gap-4">
-            <div>
+            <div className={fixedStatus ? "col-span-2" : ""}>
               <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-1">Category</label>
               <select 
                 value={newGoalCategory}
@@ -94,20 +103,22 @@ export default function AddGoalModal({
               </select>
             </div>
 
-            <div>
-              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-1">Backlog status</label>
-              <select 
-                value={newGoalStatus}
-                onChange={(e) => setNewGoalStatus(e.target.value as TaskStatus)}
-                className="w-full text-xs border border-gray-200 rounded-lg p-2 bg-gray-50/50"
-              >
-                <option value="inbox">Inbox</option>
-                <option value="this-week">This Week</option>
-                <option value="this-month">This Month</option>
-                <option value="someday">Someday</option>
-                <option value="today">Today's Schedule</option>
-              </select>
-            </div>
+            {!fixedStatus && (
+              <div>
+                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-1">Backlog status</label>
+                <select 
+                  value={newGoalStatus}
+                  onChange={(e) => setNewGoalStatus(e.target.value as TaskStatus)}
+                  className="w-full text-xs border border-gray-200 rounded-lg p-2 bg-gray-50/50"
+                >
+                  <option value="inbox">Inbox</option>
+                  <option value="this-week">This Week</option>
+                  <option value="this-month">This Month</option>
+                  <option value="someday">Someday</option>
+                  <option value="today">Today's Schedule</option>
+                </select>
+              </div>
+            )}
           </div>
 
           <div className="pt-3 flex gap-3">

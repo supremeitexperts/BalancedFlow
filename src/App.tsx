@@ -7,6 +7,7 @@ import {
   Search, 
   Plus, 
   PlusCircle, 
+  Trash2,
   X 
 } from 'lucide-react';
 import { Task, Habit, ActiveScreen, TaskStatus, TaskCategory, PrayerTimeslot, HabitFrequency } from './types';
@@ -39,6 +40,7 @@ import AddGoalModal from './components/AddGoalModal';
 import AddHabitModal from './components/AddHabitModal';
 import EveningRolloverModal from './components/EveningRolloverModal';
 import SettingsModal from './components/SettingsModal';
+import { TrashModal } from './components/TrashModal';
 import TaskDetailSheet from './components/TaskDetailSheet';
 import { useNotifications } from './hooks/useNotifications';
 
@@ -79,7 +81,9 @@ export default function App() {
 
   // Dialog and alignment helper states
   const [showAddGoalModal, setShowAddGoalModal] = useState(false);
+  const [addGoalPresetStatus, setAddGoalPresetStatus] = useState<TaskStatus | undefined>(undefined);
   const [showAddHabitModal, setShowAddHabitModal] = useState(false);
+  const [showTrashModal, setShowTrashModal] = useState(false);
   const [profileRolloverDate, setProfileRolloverDate] = useState<string | undefined>(undefined);
   const [isAligning, setIsAligning] = useState(false);
 
@@ -164,8 +168,17 @@ export default function App() {
       collection(db, tasksPath),
       (snapshot) => {
         const loadedTasks: Task[] = [];
+        const now = Date.now();
+        const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+        
         snapshot.forEach((snapshotDoc) => {
-          loadedTasks.push(snapshotDoc.data() as Task);
+          const task = snapshotDoc.data() as Task;
+          if (task.deletedAt && now - task.deletedAt > SEVEN_DAYS_MS) {
+            // Auto-clean up document via silent delete (fire and forget)
+            deleteDoc(snapshotDoc.ref).catch(() => {});
+          } else {
+            loadedTasks.push(task);
+          }
         });
         loadedTasks.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
         setTasks(loadedTasks);
@@ -447,7 +460,8 @@ export default function App() {
       streak: 0,
       history: Array(30).fill(false),
       frequency,
-      targetCount
+      targetCount,
+      order: (habits.length + 1) * 10
     };
 
     try {
@@ -456,6 +470,20 @@ export default function App() {
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, habitPath);
       return false;
+    }
+  };
+
+  const handleReorderHabits = async (updates: { id: string; order: number }[]) => {
+    if (!currentUser) return;
+    try {
+      const promises = updates.map(async ({ id, order }) => {
+        const habitPath = `users/${currentUser.uid}/habits/${id}`;
+        const habitRef = doc(db, habitPath);
+        await updateDoc(habitRef, { order });
+      });
+      await Promise.all(promises);
+    } catch (error) {
+      console.error("Error reordering habits in Firestore:", error);
     }
   };
 
@@ -500,18 +528,6 @@ export default function App() {
   };
 
   // Drag and drop setup for Kanban columns
-  const handleDragStart = (e: React.DragEvent, taskId: string) => {
-    e.dataTransfer.setData('text/plain', taskId);
-  };
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-  };
-
-  const handleDragEnter = (e: React.DragEvent) => {
-    e.preventDefault();
-  };
-
   const handleDrop = async (e: React.DragEvent | null, status: TaskStatus, manualTaskId?: string) => {
     if (e) e.preventDefault();
     if (!currentUser) return;
@@ -539,6 +555,30 @@ export default function App() {
       });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, taskPath);
+    }
+  };
+
+  const handleReorderTasks = async (updates: { id: string; order: number; prayerTimeslot?: PrayerTimeslot | null; status?: TaskStatus }[]) => {
+    if (!currentUser) return;
+    try {
+      const promises = updates.map(async ({ id, order, prayerTimeslot, status }) => {
+        const taskPath = `users/${currentUser.uid}/tasks/${id}`;
+        const taskRef = doc(db, taskPath);
+        const updateData: any = { order };
+        if (prayerTimeslot !== undefined) {
+          updateData.prayerTimeslot = prayerTimeslot;
+        }
+        if (status !== undefined) {
+          updateData.status = status;
+          if (status !== 'today') {
+            updateData.prayerTimeslot = null;
+          }
+        }
+        await updateDoc(taskRef, updateData);
+      });
+      await Promise.all(promises);
+    } catch (error) {
+      console.error("Error in batch reordering tasks:", error);
     }
   };
 
@@ -584,6 +624,31 @@ export default function App() {
   };
 
   const handleDeleteTask = async (taskId: string) => {
+    if (!currentUser) return;
+    const taskPath = `users/${currentUser.uid}/tasks/${taskId}`;
+    const taskRef = doc(db, taskPath);
+    try {
+      await updateDoc(taskRef, { deletedAt: Date.now() });
+      if (selectedTask?.id === taskId) {
+        setSelectedTask(null);
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, taskPath);
+    }
+  };
+
+  const handleRestoreTask = async (taskId: string) => {
+    if (!currentUser) return;
+    const taskPath = `users/${currentUser.uid}/tasks/${taskId}`;
+    const taskRef = doc(db, taskPath);
+    try {
+      await updateDoc(taskRef, { deletedAt: null });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, taskPath);
+    }
+  };
+
+  const handlePermanentDeleteTask = async (taskId: string) => {
     if (!currentUser) return;
     const taskPath = `users/${currentUser.uid}/tasks/${taskId}`;
     try {
@@ -677,8 +742,9 @@ export default function App() {
     }
   };
 
+  const activeTasks = tasks.filter(t => !t.deletedAt);
   // Compute Performance Metrics
-  const todayTasks = tasks.filter(t => t.status === 'today');
+  const todayTasks = activeTasks.filter(t => t.status === 'today');
   const totalTodayCount = todayTasks.length;
   const completedTodayCount = todayTasks.filter(t => t.completed).length;
   const plannerProgressPercent = totalTodayCount > 0 ? Math.round((completedTodayCount / totalTodayCount) * 100) : 0;
@@ -689,7 +755,7 @@ export default function App() {
   const consistencyScore = totalNodesCount > 0 ? Math.round((completedNodesCount / totalNodesCount) * 100) : 0;
 
   // Filter list results (Search query helper bounds)
-  const filteredTasks = tasks.filter(t => {
+  const filteredTasks = activeTasks.filter(t => {
     const term = searchTerm.toLowerCase();
     return (
       t.title.toLowerCase().includes(term) ||
@@ -832,6 +898,18 @@ export default function App() {
                 <FolderOpen className="size-4 shrink-0" />
                 <span className="text-sm">Goal Backlog</span>
               </button>
+              <button 
+                onClick={() => setShowTrashModal(true)}
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all cursor-pointer text-gray-600 hover:bg-gray-50`}
+              >
+                <Trash2 className="size-4 shrink-0" />
+                <span className="text-sm border-b border-transparent">Trash</span>
+                {tasks.filter(t => t.deletedAt).length > 0 && (
+                  <span className="ml-auto bg-gray-100 text-gray-600 font-bold text-[10px] px-1.5 py-0.5 rounded-md">
+                    {tasks.filter(t => t.deletedAt).length}
+                  </span>
+                )}
+              </button>
             </nav>
 
             {/* Goal Library Section on Sidebar */}
@@ -839,17 +917,20 @@ export default function App() {
               <div className="px-3 mb-3 flex items-center justify-between">
                 <h4 className="text-[11px] font-bold uppercase tracking-widest text-gray-400">Goal Library</h4>
                 <button 
-                  onClick={() => { setShowAddGoalModal(true); }}
+                  onClick={() => { 
+                    setAddGoalPresetStatus('someday');
+                    setShowAddGoalModal(true); 
+                  }}
                   className="text-gray-400 hover:text-[#163328] cursor-pointer"
                   title="Create new goal"
                 >
                   <Plus className="size-4" />
                 </button>
               </div>
-              <p className="px-3 text-[10px] font-bold text-[#8B8B88] uppercase tracking-wider mb-2">Weekly Targets</p>
+              <p className="px-3 text-[10px] font-bold text-[#8B8B88] uppercase tracking-wider mb-2">Long-Term Goals</p>
               
               <div className="flex flex-col gap-1.5">
-                {tasks.filter(t => t.status === 'this-week').slice(0, 4).map(goal => (
+                {activeTasks.filter(t => t.status === 'someday').slice(0, 4).map(goal => (
                   <div 
                     key={goal.id}
                     onClick={() => { setSelectedTask(goal); }}
@@ -871,7 +952,7 @@ export default function App() {
                     </button>
                   </div>
                 ))}
-                {tasks.filter(t => t.status === 'this-week').length === 0 && (
+                {activeTasks.filter(t => t.status === 'this-week').length === 0 && (
                   <p className="text-xs text-gray-400 italic px-3 py-1">No pending targets</p>
                 )}
               </div>
@@ -939,9 +1020,6 @@ export default function App() {
           <div className="size-6 rounded bg-[#163328] text-white flex items-center justify-center font-serif font-bold text-xs">
             BF
           </div>
-          <h1 className="font-display-title text-lg font-bold text-[#163328]">
-            Balanced Flow
-          </h1>
         </div>
         
         <div className="flex items-center gap-3">
@@ -975,32 +1053,35 @@ export default function App() {
         {/* Search header bars */}
         {activeScreen !== 'planner' && (
           <div className="sticky top-0 bg-[#F9F8F6]/90 backdrop-blur-md z-30 px-4 md:px-10 py-3.5 border-b border-gray-100 flex items-center justify-between gap-4">
-            <div className="relative flex-1 max-w-md">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-gray-400" />
-              <input 
-                type="text" 
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder={
-                  activeScreen === 'habits' 
-                    ? "Search habits..." 
-                    : "Search ambitions, goals or tags..."
-                }
-                className="w-full bg-white border border-[#E8E6E1] rounded-lg pl-9 pr-4 py-1.5 text-xs focus:outline-none focus:border-[#163328] transition-all"
-              />
-              {searchTerm && (
-                <button 
-                  onClick={() => setSearchTerm('')} 
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-650 cursor-pointer"
-                >
-                  <X className="size-3" />
-                </button>
-              )}
-            </div>
+            {activeScreen === 'habits' ? (
+              <div className="relative flex-1 max-w-md">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-gray-400" />
+                <input 
+                  type="text" 
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Search habits..."
+                  className="w-full bg-white border border-[#E8E6E1] rounded-lg pl-9 pr-4 py-1.5 text-xs focus:outline-none focus:border-[#163328] transition-all"
+                />
+                {searchTerm && (
+                  <button 
+                    onClick={() => setSearchTerm('')} 
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-650 cursor-pointer"
+                  >
+                    <X className="size-3" />
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="flex-1" />
+            )}
 
             {activeScreen === 'backlog' && (
               <button 
-                onClick={() => { setShowAddGoalModal(true); }}
+                onClick={() => { 
+                  setAddGoalPresetStatus('inbox'); // Backlog view "New Goal" defaults to Inbox
+                  setShowAddGoalModal(true); 
+                }}
                 className="bg-[#163328] text-white hover:bg-[#2d4a3e] active:scale-95 text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
               >
                 <Plus className="size-3.5" />
@@ -1025,7 +1106,7 @@ export default function App() {
           {activeScreen === 'planner' && (
             <PlannerView 
               todayTasks={todayTasks}
-              allTasks={tasks}
+              allTasks={activeTasks}
               plannerProgressPercent={plannerProgressPercent}
               completedTodayCount={completedTodayCount}
               totalTodayCount={totalTodayCount}
@@ -1041,6 +1122,7 @@ export default function App() {
               loadingPrayerTimes={loadingPrayerTimes}
               userLocation={userLocation}
               onOpenSettings={() => setShowSettingsModal(true)}
+              handleReorderTasks={handleReorderTasks}
             />
           )}
 
@@ -1051,6 +1133,7 @@ export default function App() {
               consistencyScore={consistencyScore}
               toggleHabitToday={toggleHabitToday}
               handleDeleteHabit={handleDeleteHabit}
+              handleReorderHabits={handleReorderHabits}
             />
           )}
 
@@ -1060,12 +1143,11 @@ export default function App() {
               selectedTask={selectedTask}
               setSelectedTask={setSelectedTask}
               moveTaskToTodaySlot={moveTaskToTodaySlot}
-              handleDragStart={handleDragStart}
-              handleDragOver={handleDragOver}
-              handleDragEnter={handleDragEnter}
               handleDrop={handleDrop}
               handleUpdateTaskDetail={handleUpdateTaskDetail}
               handleDeleteTask={handleDeleteTask}
+              onCreateGoal={handleCreateGoal}
+              handleReorderTasks={handleReorderTasks}
             />
           )}
         </AnimatePresence>
@@ -1126,8 +1208,12 @@ export default function App() {
         {showAddGoalModal && (
           <AddGoalModal 
             isOpen={showAddGoalModal}
-            onClose={() => setShowAddGoalModal(false)}
+            onClose={() => {
+              setShowAddGoalModal(false);
+              setAddGoalPresetStatus(undefined);
+            }}
             onCreateGoal={handleCreateGoal}
+            fixedStatus={addGoalPresetStatus}
           />
         )}
 
@@ -1136,6 +1222,18 @@ export default function App() {
             isOpen={showAddHabitModal}
             onClose={() => setShowAddHabitModal(false)}
             onCreateHabit={handleCreateHabit}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showTrashModal && (
+          <TrashModal 
+            isOpen={showTrashModal}
+            onClose={() => setShowTrashModal(false)}
+            deletedTasks={tasks.filter(t => t.deletedAt)}
+            onRestore={handleRestoreTask}
+            onPermanentDelete={handlePermanentDeleteTask}
           />
         )}
       </AnimatePresence>
