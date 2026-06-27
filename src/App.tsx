@@ -298,7 +298,7 @@ export default function App() {
           }
         }
       } catch (err) {
-        console.error("Error setting prayer times, using default fallbacks:", err);
+        console.warn("Information: Using standard prayer times because external API is temporarily offline:", err);
       } finally {
         if (isMounted) {
           setLoadingPrayerTimes(false);
@@ -418,7 +418,8 @@ export default function App() {
     title: string, 
     desc: string, 
     category: TaskCategory, 
-    status: TaskStatus
+    status: TaskStatus,
+    prayerTimeslot?: PrayerTimeslot | null
   ): Promise<boolean> => {
     if (!currentUser) return false;
 
@@ -433,7 +434,7 @@ export default function App() {
       status,
       category,
       completed: false,
-      prayerTimeslot: status === 'today' ? 'Pre-Fajr' : null,
+      prayerTimeslot: status === 'today' ? (prayerTimeslot || 'Pre-Fajr') : null,
       createdAt: new Date().toISOString()
     };
 
@@ -498,23 +499,38 @@ export default function App() {
     }
   };
 
-  // Toggle habit completes for current day
-  const toggleHabitToday = async (habitId: string) => {
+  // Toggle habit completes for current day or a past day index (22-29)
+  const toggleHabitToday = async (habitId: string, dayIndex: number = 29) => {
     if (!currentUser) return;
     const habitPath = `users/${currentUser.uid}/habits/${habitId}`;
     const habitRef = doc(db, habitPath);
     const habit = habits.find(h => h.id === habitId);
     if (!habit) return;
 
-    const nextHistory = [...habit.history];
-    const isCurrentlyCompleted = nextHistory[29];
-    nextHistory[29] = !isCurrentlyCompleted;
+    let nextHistory = [...habit.history];
+    if (nextHistory.length < 30) {
+      while (nextHistory.length < 30) {
+        nextHistory.push(false);
+      }
+    }
+
+    const isCurrentlyCompleted = nextHistory[dayIndex];
+    nextHistory[dayIndex] = !isCurrentlyCompleted;
     
-    let nextStreak = habit.streak;
-    if (!isCurrentlyCompleted) {
-      nextStreak += 1;
-    } else {
-      nextStreak = Math.max(0, nextStreak - 1);
+    // Recalculate streak dynamically based on full history from yesterday (index 28) backward,
+    // plus today (index 29) if it is completed.
+    let nextStreak = 0;
+    let checkIdx = 28;
+    while (checkIdx >= 0) {
+      if (nextHistory[checkIdx]) {
+        nextStreak++;
+        checkIdx--;
+      } else {
+        break;
+      }
+    }
+    if (nextHistory[29]) {
+      nextStreak++;
     }
 
     try {
@@ -603,7 +619,23 @@ export default function App() {
     const taskPath = `users/${currentUser.uid}/tasks/${taskId}`;
     const taskRef = doc(db, taskPath);
     try {
-      await updateDoc(taskRef, { completed: !task.completed });
+      if (task.status === 'today') {
+        const nextCompleted = !task.completed;
+        if (nextCompleted) {
+          // Send completed today tasks directly to trash
+          await updateDoc(taskRef, { 
+            completed: true, 
+            deletedAt: Date.now() 
+          });
+        } else {
+          await updateDoc(taskRef, { 
+            completed: false, 
+            deletedAt: null 
+          });
+        }
+      } else {
+        await updateDoc(taskRef, { completed: !task.completed });
+      }
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, taskPath);
     }
@@ -613,6 +645,20 @@ export default function App() {
     if (!currentUser) return;
     const taskPath = `users/${currentUser.uid}/tasks/${updated.id}`;
     const taskRef = doc(db, taskPath);
+    
+    // If it's a today's task being completed, set deletedAt so it goes to trash!
+    if (updated.status === 'today') {
+      if (updated.completed) {
+        if (!updated.deletedAt) {
+          updated.deletedAt = Date.now();
+        }
+      } else {
+        if (updated.deletedAt) {
+          delete updated.deletedAt;
+        }
+      }
+    }
+
     try {
       await setDoc(taskRef, updated);
       if (selectedTask?.id === updated.id) {
@@ -642,7 +688,10 @@ export default function App() {
     const taskPath = `users/${currentUser.uid}/tasks/${taskId}`;
     const taskRef = doc(db, taskPath);
     try {
-      await updateDoc(taskRef, { deletedAt: null });
+      await updateDoc(taskRef, { 
+        deletedAt: null,
+        completed: false // restored tasks become incomplete/actionable again
+      });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, taskPath);
     }
@@ -658,6 +707,25 @@ export default function App() {
       }
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, taskPath);
+    }
+  };
+
+  const handleEmptyTrash = async () => {
+    if (!currentUser) return;
+    const deletedTasks = tasks.filter(t => t.deletedAt);
+    if (deletedTasks.length === 0) return;
+    
+    try {
+      const deletePromises = deletedTasks.map(async (task) => {
+        const taskPath = `users/${currentUser.uid}/tasks/${task.id}`;
+        await deleteDoc(doc(db, taskPath));
+      });
+      await Promise.all(deletePromises);
+      if (selectedTask && selectedTask.deletedAt) {
+        setSelectedTask(null);
+      }
+    } catch (error) {
+      console.error("Failed to empty trash:", error);
     }
   };
 
@@ -749,10 +817,40 @@ export default function App() {
   const completedTodayCount = todayTasks.filter(t => t.completed).length;
   const plannerProgressPercent = totalTodayCount > 0 ? Math.round((completedTodayCount / totalTodayCount) * 100) : 0;
 
-  // Consistency Score formula: percentage of completed nodes in all habits histories past 30 days
-  const totalNodesCount = habits.length * 30;
-  const completedNodesCount = habits.reduce((acc, h) => acc + h.history.filter(Boolean).length, 0);
-  const consistencyScore = totalNodesCount > 0 ? Math.round((completedNodesCount / totalNodesCount) * 100) : 0;
+  // Consistency Score formula: dynamic & frequency-aware compliance for daily/weekly/monthly habits over the past 30 days
+  let totalExpectedNodes = 0;
+  let totalCompletedNodes = 0;
+
+  habits.forEach(h => {
+    const freq = h.frequency || 'daily';
+    const target = h.targetCount || 1;
+    const history = h.history || [];
+
+    if (freq === 'daily') {
+      // Daily: Expect 30 completions, count active selections up to 30
+      totalExpectedNodes += 30;
+      totalCompletedNodes += history.filter(Boolean).length;
+    } else if (freq === 'weekly') {
+      // Weekly: Expect target completions per 7-day week (capping each week at target to prevent cramming)
+      const weeks = [
+        [23, 24, 25, 26, 27, 28, 29],
+        [16, 17, 18, 19, 20, 21, 22],
+        [9, 10, 11, 12, 13, 14, 15],
+        [2, 3, 4, 5, 6, 7, 8]
+      ];
+      totalExpectedNodes += 4 * target;
+      weeks.forEach(range => {
+        const reps = range.filter(idx => history[idx]).length;
+        totalCompletedNodes += Math.min(reps, target);
+      });
+    } else if (freq === 'monthly') {
+      // Monthly: Expect target completions over the 30-day period
+      totalExpectedNodes += target;
+      totalCompletedNodes += Math.min(history.filter(Boolean).length, target);
+    }
+  });
+
+  const consistencyScore = totalExpectedNodes > 0 ? Math.round((totalCompletedNodes / totalExpectedNodes) * 100) : 0;
 
   // Filter list results (Search query helper bounds)
   const filteredTasks = activeTasks.filter(t => {
@@ -1234,6 +1332,7 @@ export default function App() {
             deletedTasks={tasks.filter(t => t.deletedAt)}
             onRestore={handleRestoreTask}
             onPermanentDelete={handlePermanentDeleteTask}
+            onEmptyTrash={handleEmptyTrash}
           />
         )}
       </AnimatePresence>

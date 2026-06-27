@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { Check, Clock, MoreHorizontal, Trash2, Sunset, Sparkles, Plus, FolderOpen, Target } from 'lucide-react';
 import { Task, ActiveScreen, PrayerTimeslot, TaskCategory, TaskStatus } from '../types';
@@ -156,21 +156,138 @@ function PlannerTaskCard({ task, isLibrary, toggleTaskCompleted, setSelectedTask
 }
 
 // Droppable Prayer Slot
-function PrayerSlotDroppable({ slot, computedPrayerTimes, tasksInSlot, toggleTaskCompleted, setSelectedTask, handleDeleteTask }: { key?: string | number, slot: PrayerTimeslot, computedPrayerTimes: any, tasksInSlot: Task[], toggleTaskCompleted: any, setSelectedTask: any, handleDeleteTask: any }) {
+function PrayerSlotDroppable({ 
+  slot, 
+  computedPrayerTimes, 
+  tasksInSlot, 
+  toggleTaskCompleted, 
+  setSelectedTask, 
+  handleDeleteTask,
+  handleCreateGoal 
+}: { 
+  key?: string | number, 
+  slot: PrayerTimeslot, 
+  computedPrayerTimes: any, 
+  tasksInSlot: Task[], 
+  toggleTaskCompleted: any, 
+  setSelectedTask: any, 
+  handleDeleteTask: any,
+  handleCreateGoal: (title: string, desc: string, category: TaskCategory, status: TaskStatus, prayerTimeslot?: PrayerTimeslot | null) => Promise<boolean>
+}) {
   const { isOver, setNodeRef } = useDroppable({
     id: slot,
   });
 
+  const [isAdding, setIsAdding] = useState(false);
+  const [title, setTitle] = useState('');
+  const [category, setCategory] = useState<TaskCategory>(
+    slot === 'Dhuhr' || slot === 'Asr' ? 'Work' : slot === 'Maghrib' ? 'Wellness' : 'Spiritual'
+  );
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isAdding && inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, [isAdding]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!title.trim() || isSubmitting) return;
+
+    setIsSubmitting(true);
+    try {
+      const success = await handleCreateGoal(
+        title.trim(),
+        `Cultivated inline directly in ${slot}`,
+        category,
+        'today',
+        slot
+      );
+      if (success) {
+        setTitle('');
+        setIsAdding(false);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   return (
     <div key={slot} className="flex flex-col">
-      <div className="flex items-center gap-3 py-3 select-none">
-        <div className="flex-1 border-t border-dotted border-[#eabe94] opacity-80" />
-        <span className="font-heading-section text-base text-[#795835] font-semibold">{slot}</span>
-        <span className="text-[10px] text-[#8B8B88] font-bold bg-[#E8E6E1]/50 px-2 py-0.5 rounded-full">
-          {computedPrayerTimes[slot]}
-        </span>
-        <div className="flex-1 border-t border-dotted border-[#eabe94] opacity-80" />
-      </div>
+      {isAdding ? (
+        <form 
+          onSubmit={handleSubmit} 
+          className="flex items-center gap-2 py-2.5 px-3.5 my-1.5 border border-[#163328] bg-white rounded-xl shadow-xs select-none animate-in fade-in duration-200"
+        >
+          <input
+            ref={inputRef}
+            type="text"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                setIsAdding(false);
+                setTitle('');
+              }
+            }}
+            placeholder={`Add target to ${slot}...`}
+            className="flex-1 text-xs text-[#1C1C1A] bg-transparent focus:outline-none placeholder:text-gray-400 font-medium font-sans min-w-0"
+            disabled={isSubmitting}
+          />
+          
+          <select
+            value={category}
+            onChange={(e) => setCategory(e.target.value as TaskCategory)}
+            className="text-[10px] font-bold uppercase tracking-wider bg-gray-50 border border-gray-100 px-2 py-1 rounded-lg text-gray-600 focus:outline-none cursor-pointer hover:bg-gray-105 transition-colors shrink-0 font-mono"
+            disabled={isSubmitting}
+          >
+            <option value="Spiritual">Spiritual</option>
+            <option value="Work">Work</option>
+            <option value="Wellness">Wellness</option>
+            <option value="Personal">Personal</option>
+            <option value="Admin">Admin</option>
+          </select>
+
+          <button
+            type="submit"
+            disabled={isSubmitting}
+            className="bg-[#163328] hover:bg-[#204436] disabled:opacity-50 text-white px-3 py-1 text-xs font-bold uppercase tracking-wider rounded-lg flex items-center gap-1 cursor-pointer shrink-0 transition-colors font-sans"
+          >
+            {isSubmitting ? '...' : 'Add'}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setIsAdding(false);
+              setTitle('');
+            }}
+            disabled={isSubmitting}
+            className="text-gray-400 hover:text-gray-600 px-1.5 py-1 text-xs cursor-pointer rounded-lg hover:bg-gray-100/50 hover:text-gray-950 transition-colors font-sans"
+          >
+            Cancel
+          </button>
+        </form>
+      ) : (
+        <div 
+          onClick={() => setIsAdding(true)} 
+          className="flex items-center gap-3 py-3 select-none cursor-pointer group hover:opacity-90 transition-all"
+          title={`Click to quickly add an intention to ${slot}`}
+        >
+          <div className="flex-1 border-t border-dotted border-[#eabe94] opacity-80 group-hover:border-[#163328]/40" />
+          <div className="flex items-center gap-1.5 px-3 py-1 bg-transparent group-hover:bg-[#FAF9F6] rounded-full transition-all border border-transparent group-hover:border-[#E8E6E1]">
+            <span className="font-heading-section text-base text-[#795835] font-semibold group-hover:text-[#163328] transition-colors">{slot}</span>
+            <span className="text-[10px] text-[#8B8B88] font-bold bg-[#E8E6E1]/50 px-2 py-0.5 rounded-full">
+              {computedPrayerTimes[slot]}
+            </span>
+            <Plus className="size-3.5 text-[#163328] opacity-0 group-hover:opacity-100 transition-all ml-1 shrink-0 scale-95 group-hover:scale-100" />
+          </div>
+          <div className="flex-1 border-t border-dotted border-[#eabe94] opacity-80 group-hover:border-[#163328]/40" />
+        </div>
+      )}
 
       <div 
         ref={setNodeRef}
@@ -223,7 +340,7 @@ interface PlannerViewProps {
   setShowRollover: (show: boolean) => void;
   handleQuickPlannerAddInput: (e: React.FormEvent) => Promise<void>;
   moveTaskToTodaySlot: (taskId: string, slot: PrayerTimeslot) => Promise<void>;
-  handleCreateGoal: (title: string, desc: string, category: TaskCategory, status: TaskStatus) => Promise<boolean>;
+  handleCreateGoal: (title: string, desc: string, category: TaskCategory, status: TaskStatus, prayerTimeslot?: PrayerTimeslot | null) => Promise<boolean>;
   computedPrayerTimes: Record<PrayerTimeslot, string>;
   loadingPrayerTimes: boolean;
   userLocation: string;
@@ -380,6 +497,79 @@ export default function PlannerView({
               <span className="text-[10px] text-gray-500 font-medium">Completed tasks</span>
             </div>
           </div>
+        </div>        {/* GOAL LIBRARY / WEEKLY TARGETS SECTION */}
+        <div className="bg-white border border-[#E8E6E1] rounded-2xl p-5 shadow-xs flex flex-col gap-4">
+          <div className="flex justify-between items-center border-b border-gray-100 pb-3 flex-wrap gap-2">
+            <div>
+              <h3 className="font-display-title text-base font-bold text-[#163328] flex items-center gap-1.5">
+                <FolderOpen className="size-4 text-[#795835]" /> Goal Library (Weekly Targets)
+              </h3>
+              <p className="text-[10px] text-gray-500 font-medium">Create unscheduled targets. Check them off as you complete them.</p>
+            </div>
+            <span className="text-[10px] uppercase font-bold text-gray-500 bg-gray-50 px-2.5 py-0.5 rounded-full">
+              {allTasks.filter(t => t.status === 'this-week').length} goals
+            </span>
+          </div>
+
+          {/* List of library goals */}
+          <div className="flex flex-col gap-2 max-h-60 overflow-y-auto pr-1">
+            {allTasks.filter(t => t.status === 'this-week').map((goal) => (
+              <PlannerTaskCard 
+                key={goal.id} 
+                task={goal} 
+                isLibrary={true} 
+                moveTaskToTodaySlot={moveTaskToTodaySlot}
+                handleDeleteTask={handleDeleteTask}
+                toggleTaskCompleted={toggleTaskCompleted}
+              />
+            ))}
+
+            {allTasks.filter(t => t.status === 'this-week').length === 0 && (
+              <div className="py-6 text-center text-xs text-gray-400 italic">
+                Goal Library is currently empty. Add your weekly targets below!
+              </div>
+            )}
+          </div>
+
+          {/* Add goal directly to library */}
+          <form 
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const form = e.currentTarget;
+              const input = form.elements.namedItem('libraryGoalTitle') as HTMLInputElement;
+              const selectCategory = form.elements.namedItem('libraryGoalCategory') as HTMLSelectElement;
+              if (!input || !input.value.trim()) return;
+
+              const success = await handleCreateGoal(input.value.trim(), 'Cultivated directly in goal library', selectCategory.value as TaskCategory, 'this-week');
+              if (success) {
+                input.value = '';
+              }
+            }}
+            className="flex gap-2 border-t border-gray-100 pt-3"
+          >
+            <input 
+              name="libraryGoalTitle"
+              type="text" 
+              placeholder="Add weekly target to library..."
+              className="flex-1 bg-gray-50/50 hover:bg-gray-55 text-xs px-3 py-1.5 rounded-lg focus:outline-none focus:bg-white border border-gray-100 placeholder:text-gray-400 font-medium"
+            />
+            <select 
+              name="libraryGoalCategory"
+              className="text-[10px] font-bold uppercase tracking-wider border border-gray-100 bg-gray-50 px-2 rounded-lg text-gray-600 focus:outline-none"
+            >
+              <option value="Work">Work</option>
+              <option value="Spiritual">Spiritual</option>
+              <option value="Wellness">Wellness</option>
+              <option value="Personal">Personal</option>
+              <option value="Admin">Admin</option>
+            </select>
+            <button 
+              type="submit" 
+              className="bg-[#163328] hover:bg-[#2d4a3e] text-white px-3 py-1.5 text-xs font-bold uppercase tracking-wider rounded-lg flex items-center gap-1 cursor-pointer shrink-0"
+            >
+              <Plus className="size-3.5" /> Add
+            </button>
+          </form>
         </div>
 
         {/* Quick add a Task straight to Planner inline - Reimagined for Mindfulness & Premium UX */}
@@ -471,7 +661,7 @@ export default function PlannerView({
                     setIsCategoryOpen(!isCategoryOpen);
                     setIsSlotOpen(false);
                   }}
-                  className="flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 text-xs font-semibold cursor-pointer select-none transition-all shadow-2xs hover:border-gray-300"
+                  className="flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-gray-200 bg-white hover:bg-gray-50/50 text-gray-700 text-xs font-semibold cursor-pointer select-none transition-all shadow-2xs hover:border-gray-300"
                 >
                   <span 
                     className="size-1.5 rounded-full shrink-0" 
@@ -525,81 +715,6 @@ export default function PlannerView({
           </div>
         </form>
 
-        {/* GOAL LIBRARY / WEEKLY TARGETS SECTION */}
-        <div className="bg-white border border-[#E8E6E1] rounded-2xl p-5 shadow-xs flex flex-col gap-4">
-          <div className="flex justify-between items-center border-b border-gray-100 pb-3 flex-wrap gap-2">
-            <div>
-              <h3 className="font-display-title text-base font-bold text-[#163328] flex items-center gap-1.5">
-                <FolderOpen className="size-4 text-[#795835]" /> Goal Library (Weekly Targets)
-              </h3>
-              <p className="text-[10px] text-gray-500 font-medium">Create unscheduled targets. Check them off as you complete them.</p>
-            </div>
-            <span className="text-[10px] uppercase font-bold text-gray-500 bg-gray-50 px-2.5 py-0.5 rounded-full">
-              {allTasks.filter(t => t.status === 'this-week').length} goals
-            </span>
-          </div>
-
-          {/* List of library goals */}
-          <div className="flex flex-col gap-2 max-h-60 overflow-y-auto pr-1">
-            {allTasks.filter(t => t.status === 'this-week').map((goal) => (
-              <PlannerTaskCard 
-                key={goal.id} 
-                task={goal} 
-                isLibrary={true} 
-                moveTaskToTodaySlot={moveTaskToTodaySlot}
-                handleDeleteTask={handleDeleteTask}
-                toggleTaskCompleted={toggleTaskCompleted}
-              />
-            ))}
-
-            {allTasks.filter(t => t.status === 'this-week').length === 0 && (
-              <div className="py-6 text-center text-xs text-gray-400 italic">
-                Goal Library is currently empty. Add your weekly targets below!
-              </div>
-            )}
-          </div>
-
-          {/* Add goal directly to library */}
-          <form 
-            onSubmit={async (e) => {
-              e.preventDefault();
-              const form = e.currentTarget;
-              const input = form.elements.namedItem('libraryGoalTitle') as HTMLInputElement;
-              const selectCategory = form.elements.namedItem('libraryGoalCategory') as HTMLSelectElement;
-              if (!input || !input.value.trim()) return;
-
-              const success = await handleCreateGoal(input.value.trim(), 'Cultivated directly in goal library', selectCategory.value as TaskCategory, 'this-week');
-              if (success) {
-                input.value = '';
-              }
-            }}
-            className="flex gap-2 border-t border-gray-100 pt-3"
-          >
-            <input 
-              name="libraryGoalTitle"
-              type="text" 
-              placeholder="Add weekly target to library..."
-              className="flex-1 bg-gray-50/50 hover:bg-gray-55 text-xs px-3 py-1.5 rounded-lg focus:outline-none focus:bg-white border border-gray-100 placeholder:text-gray-400 font-medium"
-            />
-            <select 
-              name="libraryGoalCategory"
-              className="text-[10px] font-bold uppercase tracking-wider border border-gray-100 bg-gray-50 px-2 rounded-lg text-gray-600 focus:outline-none"
-            >
-              <option value="Work">Work</option>
-              <option value="Spiritual">Spiritual</option>
-              <option value="Wellness">Wellness</option>
-              <option value="Personal">Personal</option>
-              <option value="Admin">Admin</option>
-            </select>
-            <button 
-              type="submit" 
-              className="bg-[#163328] hover:bg-[#2d4a3e] text-white px-3 py-1.5 text-xs font-bold uppercase tracking-wider rounded-lg flex items-center gap-1 cursor-pointer shrink-0"
-            >
-              <Plus className="size-3.5" /> Add
-            </button>
-          </form>
-        </div>
-
         {/* Prayer Block Timeline */}
         <div className="flex flex-col gap-4">
           {(['Pre-Fajr', 'Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha', 'Night'] as PrayerTimeslot[]).map((slot) => {
@@ -613,6 +728,7 @@ export default function PlannerView({
                 toggleTaskCompleted={toggleTaskCompleted}
                 setSelectedTask={setSelectedTask}
                 handleDeleteTask={handleDeleteTask}
+                handleCreateGoal={handleCreateGoal}
               />
             );
           })}

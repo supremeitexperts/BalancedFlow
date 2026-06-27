@@ -81,16 +81,10 @@ service cloud.firestore {
           && isValidTask(request.resource.data)
           && request.resource.data.id == resource.data.id
           && request.resource.data.createdAt == resource.data.createdAt
-          && (
-            // Action 1: Toggle completed or subtasks modification
-            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['completed', 'subtasks']) ||
-            // Action 2: Drag/drop or shift slot & status, including order reordering
-            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'prayerTimeslot', 'order']) ||
-            // Action 3: Detailed edit including subtasks
-            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['title', 'description', 'category', 'timeEstimated', 'prayerTimeslot', 'status', 'order', 'subtasks']) ||
-            // Action 4: Trash updates
-            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deletedAt'])
-          );
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'title', 'description', 'status', 'category', 'timeEstimated', 
+            'prayerTimeslot', 'completed', 'deletedAt', 'order', 'subtasks'
+          ]);
         allow delete: if isEmailVerified() && userId == request.auth.uid && isValidId(taskId);
       }
 

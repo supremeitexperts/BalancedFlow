@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, ArchiveRestore, Trash2, RefreshCcw } from 'lucide-react';
 import { Task } from '../types';
@@ -9,9 +9,12 @@ interface TrashModalProps {
   deletedTasks: Task[];
   onRestore: (taskId: string) => Promise<void>;
   onPermanentDelete: (taskId: string) => Promise<void>;
+  onEmptyTrash: () => Promise<void>;
 }
 
-export function TrashModal({ isOpen, onClose, deletedTasks, onRestore, onPermanentDelete }: TrashModalProps) {
+export function TrashModal({ isOpen, onClose, deletedTasks, onRestore, onPermanentDelete, onEmptyTrash }: TrashModalProps) {
+  const [confirmEmpty, setConfirmEmpty] = useState(false);
+  
   if (!isOpen) return null;
 
   return (
@@ -29,12 +32,37 @@ export function TrashModal({ isOpen, onClose, deletedTasks, onRestore, onPermane
             <Trash2 className="size-5 text-red-500" />
             <h2 className="font-display-title text-xl font-bold text-gray-900 leading-none">Trash</h2>
           </div>
-          <button 
-            onClick={onClose}
-            className="p-2 text-gray-400 hover:text-gray-900 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
-          >
-            <X className="size-4" />
-          </button>
+          <div className="flex items-center gap-2.5">
+            {deletedTasks.length > 0 && (
+              <button
+                type="button"
+                onClick={async () => {
+                  if (confirmEmpty) {
+                    await onEmptyTrash();
+                    setConfirmEmpty(false);
+                  } else {
+                    setConfirmEmpty(true);
+                  }
+                }}
+                onMouseLeave={() => setConfirmEmpty(false)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold transition-all cursor-pointer rounded-lg border h-8.5 select-none ${
+                  confirmEmpty 
+                    ? 'text-white bg-red-700 border-red-700 hover:bg-red-800' 
+                    : 'text-red-600 hover:text-white bg-red-50 hover:bg-red-600 border border-red-200 hover:border-red-600'
+                }`}
+                title={confirmEmpty ? "Click once more to confirm permanent erasure" : "Permanently erase all items presently in trash"}
+              >
+                <Trash2 className="size-3.5" />
+                <span>{confirmEmpty ? 'Click to confirm' : 'Empty Trash'}</span>
+              </button>
+            )}
+            <button 
+              onClick={onClose}
+              className="p-2 text-gray-400 hover:text-gray-900 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer shrink-0"
+            >
+              <X className="size-4" />
+            </button>
+          </div>
         </div>
 
         <div className="p-4 bg-red-50/50 border-b border-red-100 shrink-0">
